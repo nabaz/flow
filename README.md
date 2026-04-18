@@ -5,18 +5,26 @@ A configurable alert routing service. Ingests monitoring alerts via REST API, ev
 ## Build & Run
 
 ```bash
-docker build -t alert-router . && docker run -p 8080:8080 alert-router
+docker build -t alert-router . && docker run --name alert-router -p 8080:8080 alert-router
 ```
 
 Service listens on **port 8080** and is ready within ~4 seconds of `docker run`.
 
 Interactive API docs: `http://localhost:8080/docs`
 
+## Stop & Cleanup
+
+```bash
+docker rm -f alert-router
+```
+
 ## Run Tests
 
 ```bash
 docker run --rm alert-router python -m pytest tests/ -v
 ```
+
+## 
 
 ## Language & Framework
 
