@@ -14,6 +14,11 @@ def root():
     return {"status": "ok", "docs": "/docs"}
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 app.include_router(routes_router)
 app.include_router(alerts_router)
 app.include_router(system_router)
@@ -23,5 +28,8 @@ app.include_router(system_router)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
     errors = exc.errors()
     first = errors[0] if errors else {}
+    loc = first.get("loc", ())
+    field = ".".join(str(p) for p in loc if p != "body")
     msg = first.get("msg", "invalid request")
-    return JSONResponse(status_code=400, content={"error": msg})
+    error_msg = f"{field}: {msg}" if field else msg
+    return JSONResponse(status_code=400, content={"error": error_msg})

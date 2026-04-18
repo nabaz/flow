@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from fnmatch import fnmatch
 from zoneinfo import ZoneInfo
 
@@ -104,9 +104,10 @@ def evaluate_alert(alert: AlertInput, store, dry_run: bool = False) -> dict:
 
     if suppressed:
         expiry = store.suppression[(alert.service, winner.id)]
+        expiry_str = expiry.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         result["suppression_reason"] = (
             f"Alert for service '{alert.service}' on route '{winner.id}' "
-            f"suppressed until {expiry.isoformat()}"
+            f"suppressed until {expiry_str}"
         )
 
     if not dry_run:
