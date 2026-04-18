@@ -180,6 +180,7 @@ The full conversation history is preserved in the submission.
 |--------|------|-------------|
 | `POST` | `/routes` | Create or replace a routing rule (201) |
 | `GET` | `/routes` | List all routing rules |
+| `GET` | `/routes/{id}` | Get a single routing rule |
 | `DELETE` | `/routes/{id}` | Delete a routing rule |
 | `POST` | `/alerts` | Submit an alert for routing |
 | `GET` | `/alerts/{id}` | Get routing result for a specific alert |
