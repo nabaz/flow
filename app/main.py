@@ -6,7 +6,13 @@ from app.api.routes import router as routes_router
 from app.api.alerts import router as alerts_router
 from app.api.system import router as system_router
 
-app = FastAPI()
+app = FastAPI(title="Alert Routing Engine")
+
+
+@app.get("/")
+def root():
+    return {"status": "ok", "docs": "/docs"}
+
 
 app.include_router(routes_router)
 app.include_router(alerts_router)
