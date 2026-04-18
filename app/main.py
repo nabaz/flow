@@ -10,12 +10,12 @@ app = FastAPI(title="Alert Routing Engine")
 
 
 @app.get("/")
-def root():
+async def root():
     return {"status": "ok", "docs": "/docs"}
 
 
 @app.get("/health")
-def health():
+async def health():
     return {"status": "ok"}
 
 

@@ -47,7 +47,6 @@ class Store:
         self.reset()
 
     def reset(self) -> None:
-        from app.models import RouteInput, AlertInput
         self.routes: dict[str, Any] = {}          # route_id -> RouteInput
         self.alerts: dict[str, Any] = {}          # alert_id -> AlertResult dict
         self.alert_inputs: dict[str, Any] = {}    # alert_id -> AlertInput

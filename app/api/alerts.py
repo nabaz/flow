@@ -9,12 +9,12 @@ router = APIRouter()
 
 
 @router.post("/alerts")
-def submit_alert(alert: AlertInput):
+async def submit_alert(alert: AlertInput):
     return evaluate_alert(alert, store, dry_run=False)
 
 
 @router.get("/alerts/{alert_id}")
-def get_alert(alert_id: str):
+async def get_alert(alert_id: str):
     result = store.alerts.get(alert_id)
     if result is None:
         return JSONResponse(status_code=404, content={"error": "alert not found"})
@@ -22,7 +22,7 @@ def get_alert(alert_id: str):
 
 
 @router.get("/alerts")
-def list_alerts(
+async def list_alerts(
     service: str | None = Query(default=None),
     severity: str | None = Query(default=None),
     routed: bool | None = Query(default=None),

@@ -8,7 +8,7 @@ router = APIRouter()
 
 
 @router.get("/stats")
-def get_stats():
+async def get_stats():
     s = store.stats
     return {
         "total_alerts_processed": s.total_alerts_processed,
@@ -29,11 +29,11 @@ def get_stats():
 
 
 @router.post("/test")
-def test_alert(alert: AlertInput):
+async def test_alert(alert: AlertInput):
     return evaluate_alert(alert, store, dry_run=True)
 
 
 @router.post("/reset")
-def reset():
+async def reset():
     store.reset()
     return {"status": "ok"}
