@@ -149,8 +149,90 @@ def test_list_alerts_filter_severity(client):
 
 
 def test_resubmit_same_id_updates(client):
+    # First submit: routes to r1
     client.post("/routes", json=ROUTE_BASIC)
     client.post("/alerts", json=ALERT_CRITICAL)
-    r = client.post("/alerts", json={**ALERT_CRITICAL, "severity": "critical"})
-    assert r.status_code == 200
-    assert r.json()["alert_id"] == "a1"
+    # Delete route so second submit is unrouted
+    client.delete("/routes/r1")
+    client.post("/alerts", json=ALERT_CRITICAL)
+    # GET should reflect the updated (unrouted) result
+    r = client.get("/alerts/a1")
+    assert r.json()["routed_to"] is None
+
+
+def test_active_hours_overnight_window(client):
+    route = {**ROUTE_BASIC, "active_hours": {
+        "timezone": "UTC",
+        "start": "22:00",
+        "end": "06:00",
+    }}
+    client.post("/routes", json=route)
+    # 23:00 UTC — inside overnight window
+    r = client.post("/alerts", json={**ALERT_CRITICAL, "id": "a1", "timestamp": "2026-03-25T23:00:00Z"})
+    assert r.json()["routed_to"]["route_id"] == "r1"
+    # 03:00 UTC — inside overnight window (past midnight)
+    r = client.post("/alerts", json={**ALERT_CRITICAL, "id": "a2", "timestamp": "2026-03-26T03:00:00Z"})
+    assert r.json()["routed_to"]["route_id"] == "r1"
+    # 12:00 UTC — outside overnight window
+    r = client.post("/alerts", json={**ALERT_CRITICAL, "id": "a3", "timestamp": "2026-03-25T12:00:00Z"})
+    assert r.json()["routed_to"] is None
+
+
+def test_active_hours_exact_end_time_excluded(client):
+    route = {**ROUTE_BASIC, "active_hours": {"timezone": "UTC", "start": "09:00", "end": "17:00"}}
+    client.post("/routes", json=route)
+    # Exactly at end time — should NOT match (exclusive end)
+    r = client.post("/alerts", json={**ALERT_CRITICAL, "timestamp": "2026-03-25T17:00:00Z"})
+    assert r.json()["routed_to"] is None
+
+
+def test_label_condition_empty_alert_labels(client):
+    route = {**ROUTE_BASIC, "conditions": {"labels": {"env": "prod"}}}
+    client.post("/routes", json=route)
+    # Alert has no labels — should not match
+    r = client.post("/alerts", json={**ALERT_CRITICAL, "labels": {}})
+    assert r.json()["routed_to"] is None
+
+
+def test_list_alerts_filter_service(client):
+    client.post("/alerts", json={**ALERT_CRITICAL, "id": "a1", "service": "payment-api"})
+    client.post("/alerts", json={**ALERT_CRITICAL, "id": "a2", "service": "auth-service"})
+    r = client.get("/alerts?service=payment-api")
+    assert r.json()["total"] == 1
+    assert r.json()["alerts"][0]["alert_id"] == "a1"
+
+
+def test_list_alerts_filter_suppressed(client):
+    route = {**ROUTE_BASIC, "suppression_window_seconds": 300}
+    client.post("/routes", json=route)
+    client.post("/alerts", json={**ALERT_CRITICAL, "id": "a1", "timestamp": "2026-03-25T14:30:00Z"})
+    client.post("/alerts", json={**ALERT_CRITICAL, "id": "a2", "timestamp": "2026-03-25T14:31:00Z"})
+
+    r = client.get("/alerts?suppressed=true")
+    assert r.json()["total"] == 1
+    assert r.json()["alerts"][0]["alert_id"] == "a2"
+
+    r = client.get("/alerts?suppressed=false")
+    assert r.json()["total"] == 1
+    assert r.json()["alerts"][0]["alert_id"] == "a1"
+
+
+def test_list_alerts_combined_filters(client):
+    client.post("/routes", json=ROUTE_BASIC)
+    client.post("/alerts", json={**ALERT_CRITICAL, "id": "a1", "service": "payment-api"})
+    client.post("/alerts", json={**ALERT_CRITICAL, "id": "a2", "service": "payment-api", "severity": "warning"})
+    client.post("/alerts", json={**ALERT_CRITICAL, "id": "a3", "service": "auth-service"})
+
+    r = client.get("/alerts?service=payment-api&routed=true")
+    assert r.json()["total"] == 1
+    assert r.json()["alerts"][0]["alert_id"] == "a1"
+
+
+def test_evaluation_details_counts(client):
+    client.post("/routes", json=ROUTE_BASIC)
+    client.post("/routes", json={**ROUTE_BASIC, "id": "r2", "conditions": {"severity": ["warning"]}})
+    r = client.post("/alerts", json=ALERT_CRITICAL)
+    body = r.json()
+    assert body["evaluation_details"]["total_routes_evaluated"] == 2
+    assert body["evaluation_details"]["routes_matched"] == 1
+    assert body["evaluation_details"]["routes_not_matched"] == 1
