@@ -16,7 +16,7 @@ async def create_route(route: RouteInput):
 
 @router.get("/routes")
 async def list_routes():
-    return {"routes": [r.model_dump() for r in store.routes.values()]}
+    return {"routes": [r.model_dump(exclude_none=True) for r in store.routes.values()]}
 
 
 @router.delete("/routes/{route_id}")

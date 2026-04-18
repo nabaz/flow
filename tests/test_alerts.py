@@ -228,6 +228,26 @@ def test_list_alerts_combined_filters(client):
     assert r.json()["alerts"][0]["alert_id"] == "a1"
 
 
+def test_empty_conditions_matches_all(client):
+    route = {**ROUTE_BASIC, "conditions": {}}
+    client.post("/routes", json=route)
+    # any severity, any service, any group should match
+    r = client.post("/alerts", json={**ALERT_CRITICAL, "severity": "info", "service": "anything", "group": "anywhere"})
+    assert r.json()["routed_to"]["route_id"] == "r1"
+
+
+def test_three_routes_priority_and_matched_routes(client):
+    client.post("/routes", json={**ROUTE_BASIC, "id": "low",  "priority": 1,  "target": {"type": "slack", "channel": "#low"}})
+    client.post("/routes", json={**ROUTE_BASIC, "id": "mid",  "priority": 5,  "target": {"type": "slack", "channel": "#mid"}})
+    client.post("/routes", json={**ROUTE_BASIC, "id": "high", "priority": 10, "target": {"type": "slack", "channel": "#high"}})
+    r = client.post("/alerts", json=ALERT_CRITICAL)
+    body = r.json()
+    assert body["routed_to"]["route_id"] == "high"
+    assert set(body["matched_routes"]) == {"low", "mid", "high"}
+    assert body["evaluation_details"]["routes_matched"] == 3
+    assert body["evaluation_details"]["total_routes_evaluated"] == 3
+
+
 def test_evaluation_details_counts(client):
     client.post("/routes", json=ROUTE_BASIC)
     client.post("/routes", json={**ROUTE_BASIC, "id": "r2", "conditions": {"severity": ["warning"]}})

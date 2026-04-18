@@ -45,3 +45,20 @@ def test_route_requires_target_fields(client):
     bad = {**ROUTE_BASIC, "target": {"type": "slack"}}  # missing channel
     r = client.post("/routes", json=bad)
     assert r.status_code == 400
+
+
+def test_list_routes_no_null_fields(client):
+    client.post("/routes", json=ROUTE_BASIC)
+    route = client.get("/routes").json()["routes"][0]
+    # target should only have type + channel, no null fields
+    assert set(route["target"].keys()) == {"type", "channel"}
+    # no active_hours key when not set
+    assert "active_hours" not in route
+
+
+def test_update_route_replaces_it(client):
+    client.post("/routes", json=ROUTE_BASIC)
+    updated = {**ROUTE_BASIC, "priority": 99}
+    r = client.post("/routes", json=updated)
+    assert r.json() == {"id": "r1", "created": False}
+    assert client.get("/routes").json()["routes"][0]["priority"] == 99
