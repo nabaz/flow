@@ -44,6 +44,17 @@ The dry-run endpoint reads current suppression state (so it gives an accurate pr
 **400 errors include the field name**
 Rather than forwarding Pydantic's raw message, errors are formatted as `"field: reason"` (e.g. `"severity: Input should be 'critical', 'warning' or 'info'"`). This makes the error immediately actionable without needing to parse a nested detail object.
 
+## AI-Native Workflow
+
+This project was built using an AI-native workflow — Claude as a genuine co-builder, not an autocomplete. The approach:
+
+- **Incremental decomposition** rather than one big prompt. Spec → plan file → one file at a time (models → store → engine → API → tests → polish). Each step reviewed, committed, and pushed before moving on.
+- **Targeted delegation**: boilerplate, repetitive test cases, and mechanical validators went to Claude; architecture decisions (in-memory vs SQLite, sync vs async handlers, suppression keying, exclusive-end active hours) were deliberate human calls.
+- **Iterative course correction**: when smoke tests revealed issues (e.g. `suppression_reason` outputting `+00:00` instead of `Z`, `GET /routes` leaking null fields), they were fed back into the conversation rather than patched silently.
+- **Git as a feedback loop**: every stable checkpoint was committed and pushed, so course corrections had clear rollback points.
+
+The full conversation history is preserved in the submission.
+
 ## API Overview
 
 | Method | Path | Description |
