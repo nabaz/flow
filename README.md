@@ -44,6 +44,41 @@ The dry-run endpoint reads current suppression state (so it gives an accurate pr
 **400 errors include the field name**
 Rather than forwarding Pydantic's raw message, errors are formatted as `"field: reason"` (e.g. `"severity: Input should be 'critical', 'warning' or 'info'"`). This makes the error immediately actionable without needing to parse a nested detail object.
 
+## Future Improvements
+
+The current implementation is an MVP optimized for correctness under a 2-hour time-box. Taking it to production would involve these changes:
+
+### Persistence
+
+In-memory state disappears on container restart and can't be shared across replicas. Two stores with different access patterns:
+
+- **PostgreSQL for routes and alert history.** Routes are a small, read-heavy dataset with structured queries — a `routes` table with a JSONB `conditions` column and a partial index on `priority DESC` covers all current filters. Alert history is append-mostly with filter queries on `service`, `severity`, and `routed`/`suppressed` booleans — a single table with composite indexes on those columns handles it. Keeping the evaluation logic pure (same inputs → same output) means the DB layer can be swapped in without touching `engine.py`.
+- **Redis for suppression state.** Suppression is the one piece of state that's both hot-path and naturally TTL-bound. `SET service:route_id 1 EX <window> NX` is atomic, auto-expires, and avoids a background cleanup job. The `(service, route_id)` key maps cleanly to a Redis string. Alternative: `pg_cron` on a `suppressions` table with `expires_at` — slower but one less service to operate.
+
+### Horizontal Scaling & Distributed Locking
+
+Running multiple replicas behind a load balancer introduces a classic race: two alerts for the same `(service, route)` arrive at different replicas simultaneously — both check suppression, both see "not suppressed," both notify. The Redis approach above solves this cleanly: `SET ... NX` returns success to exactly one caller, the other receives `nil` and treats the alert as suppressed. No separate lock service needed.
+
+For route evaluation itself, each request is independent and can run on any replica — no coordination required. Stats counters would move to Redis `INCR` (atomic) or be computed on read from the alert history table (slower but always consistent).
+
+If alert delivery becomes async (a notifier worker pulls routed alerts off a queue), use a durable queue (SQS, Redis Streams, or Postgres `FOR UPDATE SKIP LOCKED`) for at-least-once delivery with idempotency keys on the (alert_id, route_id) tuple.
+
+### API Contract & OpenAPI
+
+FastAPI already serves an auto-generated OpenAPI spec at `/openapi.json` and Swagger UI at `/docs`. To productionize:
+
+- **Explicit response models.** Today the engine returns dicts; replacing them with Pydantic response models surfaces the full shape in the OpenAPI spec and catches drift at compile time.
+- **Spec export to the repo.** Committing `openapi.json` lets downstream consumers generate clients (`openapi-generator`, `orval`) and enables contract tests (`schemathesis`) in CI.
+- **Versioned endpoints.** `/v1/alerts` from day one so breaking changes can ship without coordination.
+
+### Other Production Concerns
+
+- **Structured logging and tracing** — JSON logs with request IDs, OpenTelemetry spans around `evaluate_alert` to profile matching on large route counts.
+- **Metrics** — Prometheus counters (alerts processed, routed, suppressed by route) exposed at `/metrics`.
+- **Actual notification delivery** — the `target` field currently describes where to send but the service doesn't deliver. A separate notifier service consuming routed alerts from a queue keeps the routing engine fast and decouples failure modes.
+- **AuthZ/AuthN** — at minimum, API keys on the admin endpoints (`POST /routes`, `POST /reset`).
+- **Rate limiting** on `POST /alerts` per-service to prevent noisy neighbors from overwhelming the matcher.
+
 ## AI-Native Workflow
 
 This project was built using an AI-native workflow — Claude as a genuine co-builder, not an autocomplete. The approach:
