@@ -1,5 +1,9 @@
 {
   "plansDirectory": ".claude/plans",
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "permissions": {
     "allow": [
       "Bash(docker build *)",
