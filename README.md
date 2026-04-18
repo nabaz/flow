@@ -86,6 +86,83 @@ The `webhook` target is the only one we could actually deliver today, and naïve
 - **Dead-letter queue** for deliveries that exhaust retries, plus a Prometheus counter + alert so humans know the queue has grown.
 - **Delivery receipt persistence** — store `{alert_id, route_id, attempt, status, response_code, timestamp}` so `GET /alerts/{id}` can show whether the notification actually made it, not just that we tried.
 
+## Advanced Routing Features
+
+Beyond reliability, the routing model itself has room to grow. Three features that would earn their keep:
+
+### Nested Routing Trees (Parent/Child Rules)
+
+The current flat model — evaluate every route, highest priority wins — doesn't express ownership hierarchies naturally. Alertmanager's tree model is the right shape: parent routes act as filters that scope which children are eligible.
+
+```
+route: { match: { environment: "production" }, children: [
+  { match: { group: "backend" }, target: "#backend-oncall", children: [
+    { match: { service: "payment-*" }, target: "payments-pager" }
+  ]},
+  { match: { group: "frontend" }, target: "#frontend-oncall" }
+]}
+```
+
+An alert flows down until it hits the most specific matching leaf. Design work:
+
+- **Evaluation semantics**: does a parent's target act as a fallback if no child matches, or only as a filter? Alertmanager's `continue: true/false` resolves this — ship both modes and make it explicit per node.
+- **Cycle detection and depth limits** on create (`POST /routes`) — a 10-deep tree is fine, a self-referential one breaks the evaluator.
+- **`matched_routes` in the response becomes the path** through the tree, not a flat list — useful for debugging.
+- **Priority still wins ties** at each tree level, so flat configs remain a strict subset of the tree model. Existing routes continue to work.
+
+### Scheduled Mute Periods
+
+`active_hours` expresses recurring business-hours behavior well, but one-off mutes (planned maintenance, on-call handoff gaps, known-broken deploys) are a different shape and shouldn't be forced into a recurring schedule.
+
+Proposed model — a separate first-class resource:
+
+```
+POST /mutes
+{
+  "id": "payment-migration-2026-04-01",
+  "start": "2026-04-01T00:00:00Z",
+  "end":   "2026-04-03T00:00:00Z",
+  "match": { "service": ["payment-*"] },
+  "reason": "DB migration — expected error spike"
+}
+```
+
+Implementation notes:
+
+- **Applied after route matching, before suppression** — a muted alert is still recorded and counted (`suppressed: true` with `suppression_reason: "muted by <mute_id>"`), so post-mortem queries can find what would have paged.
+- **Match semantics mirror route conditions** — severity/service/group/labels — so operators don't learn two matching languages.
+- **Mutes are timestamp-bounded, not recurring** — if you want "every Sunday 2am-4am," that's a recurring-schedule feature worth building separately, not a hack on top of mutes.
+- **`GET /mutes?active=true&at=<ts>`** so dashboards can show "silenced right now" without clients doing the time math.
+
+### Trace / Explain API
+
+Today when a rule doesn't match, the only feedback is "it didn't match." For users authoring complex conditions, this is the #1 source of friction. Add a `POST /trace` endpoint that returns per-condition evaluation detail — the equivalent of SQL `EXPLAIN`:
+
+```
+POST /trace
+{ "alert": {...}, "route_id": "r1" }   // or omit route_id to trace all
+
+Response:
+{
+  "alert_id": "a1",
+  "routes": [{
+    "route_id": "r1",
+    "matched": false,
+    "checks": [
+      { "field": "severity", "matched": true,  "detail": "'critical' ∈ ['critical','warning']" },
+      { "field": "service",  "matched": true,  "detail": "'payment-api' matches pattern 'payment-*'" },
+      { "field": "group",    "matched": false, "detail": "'backend' ∉ ['frontend']",  "first_failure": true },
+      { "field": "labels",   "matched": null,  "detail": "not evaluated (short-circuit after group mismatch)" }
+    ],
+    "active_hours": { "matched": true, "detail": "10:30 America/New_York ∈ [09:00, 17:00)" }
+  }]
+}
+```
+
+Implementation is mostly free — `match_conditions` already does the work, it just throws away the diagnostics. Refactor it to return a `MatchResult` struct (pass/fail per check + human-readable reason) and surface that through the trace endpoint. The main evaluate path can still short-circuit; the trace path runs all checks for completeness.
+
+This turns "why didn't my rule fire?" from a support ticket into a self-service answer.
+
 ## AI-Native Workflow
 
 This project was built using an AI-native workflow — Claude as a genuine co-builder, not an autocomplete. The approach:
